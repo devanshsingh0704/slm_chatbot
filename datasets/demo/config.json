@@ -1,0 +1,29 @@
+{
+  "title": "Example Metalworks Assistant",
+  "assistant": "the internal knowledge assistant for Example Metalworks Ltd. staff (a fictional demo company)",
+  "fallback": "Sorry, currently I don't have that information.",
+  "aliases": {
+    "CEO": "chief executive officer",
+    "MD": "managing director",
+    "HR": "human resources careers jobs",
+    "CMM": "coordinate measuring machine"
+  },
+  "fixed_answers": [
+    {
+      "examples": ["What is the company address?", "where is the company located", "company address", "where are you"],
+      "keywords": ["address", "adress", "location", "located", "where"],
+      "answer": "Example Metalworks has two sites:\n- Riverside plant (head office and production): 12 Mill Road, Riverside, Exampleshire EX1 2AB.\n- Hillview warehouse (storage and dispatch only): 4 Depot Lane, Hillview, Exampleshire EX3 4CD."
+    }
+  ],
+  "speech_hint": "Questions about Example Metalworks: Maria Lindqvist, Daniel Okafor, Priya Raman, Tomas Novak, Riverside, Hillview, CMM, roll forming.",
+  "pronunciations": {
+    "Lindqvist": "Lind kvist"
+  },
+  "general_contact": "you can reach Example Metalworks at info@example.com",
+  "people": [
+    {"name": "Maria Lindqvist", "match": ["maria", "lindqvist"], "role": "the owner and Managing Director (MD)"},
+    {"name": "Daniel Okafor", "match": ["daniel", "okafor"], "role": "the Chief Executive Officer (CEO)"},
+    {"name": "Priya Raman", "match": ["priya", "raman"], "role": "the Head of Quality"},
+    {"name": "Tomas Novak", "match": ["tomas", "novak"], "role": "the Production Manager (roll forming and welding)"}
+  ]
+}

@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1c2430; --muted: #5d6878;
+    --line: #dde2e8; --accent: #1f5fae; --user: #e7effa; --warn: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --panel: #1a2029; --text: #e3e8ef; --muted: #98a3b3;
+      --line: #2c3542; --accent: #6ea8f0; --user: #1f2d40; --warn: #e0b45c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { max-width: 820px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; padding: 0 16px; }
+  header { padding: 20px 0 12px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+  #chat { flex: 1; padding: 16px 0; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 92%; padding: 12px 14px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .user { align-self: flex-end; background: var(--user); }
+  .bot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
+  .bot.pending .text::after { content: "▍"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .meta { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); white-space: normal; }
+  details { margin: 4px 0; }
+  summary { cursor: pointer; }
+  details p { margin: 6px 0 8px 14px; color: var(--text); }
+  .rate { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+  .rate button { border: 1px solid var(--line); background: transparent; color: var(--text);
+                 border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 1rem; }
+  .rate button:disabled { opacity: .5; cursor: default; }
+  .error { color: var(--warn); }
+  form { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0 20px; display: flex; gap: 8px; }
+  textarea { flex: 1; resize: none; font: inherit; color: var(--text); background: var(--panel);
+             border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-height: 48px; }
+  textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  form button { border: 0; border-radius: 8px; padding: 0 18px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  form button:disabled { opacity: .6; cursor: default; }
+  #mic { background: var(--panel); color: var(--text); border: 1px solid var(--line); padding: 0 14px; font-size: 1.1rem; }
+  #mic[aria-pressed="true"] { background: #b3261e; color: #fff; border-color: #b3261e; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>{{TITLE}}</h1>
+    <p>Answers come only from this assistant's documents. Check the sources under each answer, and rate it so we can improve.</p>
+  </header>
+  <main id="chat" aria-live="polite"></main>
+  <form id="form">
+    <textarea id="q" rows="1" aria-label="Your question" placeholder="Ask a question…" required></textarea>
+    <button type="button" id="mic" aria-label="Speak your question" aria-pressed="false" title="Speak your question">🎤</button>
+    <button id="send">Ask</button>
+  </form>
+</div>
+<script>
+const chat = document.getElementById("chat");
+const form = document.getElementById("form");
+const box = document.getElementById("q");
+const send = document.getElementById("send");
+
+// The sticky input box covers the end of the chat, so scroll the whole page rather than the element.
+const toBottom = () => window.scrollTo(0, document.body.scrollHeight);
+
+function add(cls, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + cls;
+  const span = document.createElement("span");
+  span.className = "text";
+  span.textContent = text;
+  div.append(span);
+  chat.append(div);
+  toBottom();
+  return div;
+}
+
+// Answers are spoken and shown together. The model writes far faster than anyone speaks, so the
+// streamed answer is cut into short phrases, each phrase is turned into speech (Piper on the server),
+// and its words appear on screen while it is being spoken. A phrase without audio (voice failed, sound
+// blocked) appears straight away, so text is never lost. A new question or the microphone stops it.
+let audioCtx = null, voiceRun = 0, voiceSources = [];
+
+function voiceStop() {
+  voiceRun++;  // players of older answers stop at their next step
+  voiceSources.forEach((s) => { try { s.stop(); } catch {} });
+  voiceSources = [];
+}
+
+function voiceStart() {  // must run inside the Ask click/Enter: browsers allow sound only after a user action
+  audioCtx = audioCtx || new AudioContext();
+  audioCtx.resume();
+  voiceStop();
+}
+
+function speechClip(text) {  // promise of the decoded audio for one phrase, or null
+  if (!audioCtx || audioCtx.state !== "running" || !text.trim()) return Promise.resolve(null);
+  return fetch("/speak", { method: "POST", body: JSON.stringify({ text }) })
+    .then((r) => (r.ok ? r.arrayBuffer() : null))
+    .then((b) => b && audioCtx.decodeAudioData(b))
+    .catch(() => null);
+}
+
+function makePlayer(textEl, run) {
+  let shown = "", chain = Promise.resolve();
+  const show = (s) => { textEl.textContent = s; toBottom(); };
+  return {
+    add(phrase) {
+      const clip = speechClip(phrase);  // requested now, so it is ready by the time its turn comes
+      chain = chain.then(async () => {
+        const buf = await clip;
+        if (run !== voiceRun) return;  // a newer question took over; the caller shows the full text
+        if (!buf) return show((shown += phrase));
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(audioCtx.destination);
+        voiceSources.push(src);
+        const base = shown, t0 = audioCtx.currentTime;
+        src.start();
+        await new Promise((done) => {  // reveal the phrase word by word in step with the speech
+          const step = () => {
+            if (run !== voiceRun) return done();
+            const part = Math.min(1, (audioCtx.currentTime - t0) / buf.duration);
+            let end = part >= 1 ? phrase.length : phrase.indexOf(" ", Math.ceil(part * phrase.length));
+            if (end < 0) end = phrase.length;
+            show(base + phrase.slice(0, end));
+            if (part >= 1) done(); else setTimeout(step, 60);
+          };
+          step();
+        });
+        shown = base + phrase;
+      });
+    },
+    finished: () => chain,
+  };
+}
+
+// Length of the first complete phrase in `rest`, or 0 if none is complete yet. A phrase ends at . ! ?
+// followed by whitespace, at a line break, or at , ; : once it has 6+ words (short first phrases make the
+// voice start sooner). "No." / "Pvt." do not end one; pieces under 12 characters wait for more.
+const ABBR = /\b(No|Sy|Pvt|Ltd|Mr|Mrs|Ms|Dr|St|vs|etc|e\.g|i\.e)\.$/i;
+function nextPhrase(rest) {
+  const re = /[.!?](?=\s)|[,;:](?=\s)|\n/g;
+  let m;
+  while ((m = re.exec(rest))) {
+    const piece = rest.slice(0, m.index + 1);
+    if (m[0] === "." && ABBR.test(piece)) continue;
+    if (",;:".includes(m[0]) && piece.trim().split(/\s+/).length < 6) continue;
+    if (piece.trim().length < 12) continue;
+    return m.index + 1;
+  }
+  return 0;
+}
+
+function showMeta(div, info) {
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  if (info.sources.length) meta.append("Sources:");  // greetings have none
+  for (const s of info.sources) {
+    const d = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = `${s.id} · ${s.topic} (match ${s.score.toFixed(2)})`;
+    const p = document.createElement("p");
+    p.textContent = s.text;
+    d.append(sum, p);
+    meta.append(d);
+  }
+  const rate = document.createElement("div");
+  rate.className = "rate";
+  rate.append("Was this answer right?");
+  for (const [label, good] of [["👍", true], ["👎", false]]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.setAttribute("aria-label", good ? "Answer was right" : "Answer was wrong");
+    b.onclick = () => {
+      fetch("/feedback", { method: "POST", body: JSON.stringify({ id: info.id, good }) });
+      rate.querySelectorAll("button").forEach(x => x.disabled = true);
+      rate.lastChild.after(" Thanks!");
+    };
+    rate.append(b);
+  }
+  meta.append(rate);
+  div.append(meta);
+}
+
+// Earlier questions and answers, sent with each question so follow-ups ("what does he do?") work.
+// Kept only in this page: reloading it starts a new conversation.
+const turns = [];
+const BUSY = "Server busy, please try again in a moment.";
+
+form.onsubmit = async (e) => {
+  e.preventDefault();
+  const question = box.value.trim();
+  if (!question) return;
+  box.value = "";
+  send.disabled = true;
+  voiceStart();
+  const run = voiceRun;
+  add("user", question);
+  const bot = add("bot pending", "");
+  const text = bot.querySelector(".text");
+  const player = makePlayer(text, run);
+  try {
+    const res = await fetch("/ask", { method: "POST", body: JSON.stringify({ question, history: turns.slice(-3) }) });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", info = null, cut = 0, n;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      if (!info) {
+        const nl = buf.indexOf("\n");
+        if (nl < 0) continue;
+        info = JSON.parse(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+      while ((n = nextPhrase(buf.slice(cut)))) {
+        player.add(buf.slice(cut, cut + n));
+        cut += n;
+      }
+    }
+    if (buf.slice(cut).trim()) player.add(buf.slice(cut));  // the last phrase, with no break after it
+    if (info && info.id && !buf.trim().endsWith(BUSY)) turns.push({ question, answer: buf.trim() });
+    send.disabled = false;  // a new question may interrupt the reading from here on
+    await player.finished();
+    text.textContent = buf.trim();  // exact full text, also when the reading was interrupted
+    if (info && info.id) showMeta(bot, info);  // no sources or rating when turned away as busy
+    toBottom();
+  } catch (err) {
+    text.textContent = BUSY;
+    text.classList.add("error");
+  }
+  bot.classList.remove("pending");
+  send.disabled = false;
+  box.focus();
+};
+
+// Speak a question: the recognized text goes into the box; nothing is sent until the user presses Ask.
+// Browsers allow the microphone only on https (or localhost), so the button is hidden elsewhere.
+const mic = document.getElementById("mic");
+const ASK = box.placeholder;
+let rec = null;
+if (!window.isSecureContext || !navigator.mediaDevices || !window.MediaRecorder) mic.hidden = true;
+
+function setMic(state, note) {
+  mic.textContent = state === "rec" ? "⏹" : state === "busy" ? "…" : "🎤";
+  mic.setAttribute("aria-pressed", String(state === "rec"));
+  mic.setAttribute("aria-label", state === "rec" ? "Stop recording" : "Speak your question");
+  mic.disabled = state === "busy";
+  box.placeholder = note || (state === "rec" ? "Listening… press ⏹ when you are done"
+                           : state === "busy" ? "Turning your speech into text…" : ASK);
+}
+
+mic.onclick = async () => {
+  if (rec) return rec.stop();
+  voiceStop();  // otherwise the microphone records the answer being read out
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    return setMic("idle", "Microphone not allowed. Please type your question.");
+  }
+  const chunks = [];
+  rec = new MediaRecorder(stream);
+  rec.ondataavailable = (e) => chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    const blob = new Blob(chunks, { type: rec.mimeType });
+    rec = null;
+    setMic("busy");
+    let note;
+    try {
+      const r = await (await fetch("/transcribe", { method: "POST", body: blob })).json();
+      if (r.text) box.value = (box.value ? box.value + " " : "") + r.text;
+      else note = r.error || "Sorry, I didn't catch that. Please try again or type your question.";
+    } catch {
+      note = "Server busy, please try again in a moment.";
+    }
+    setMic("idle", note);
+    box.focus();
+  };
+  rec.start();
+  setMic("rec");
+  setTimeout(() => rec && rec.state === "recording" && rec.stop(), 30000);  // spoken questions are short
+};
+
+box.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+box.focus();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# rebuilt from requirements.txt
+.venv/
+__pycache__/
+# rebuilt from datasets/*/chunks.md by build.py
+store/
+# downloaded models (Whisper, Piper voice, embedding model)
+.cache/
+# HTTPS private key (on the GPU laptop): never commit
+tls/
+# colleagues' questions and ratings: personal usage data that changes all the time
+datasets/*/chat_log.jsonl
+datasets/*/raw/
+# review page password (REVIEW_PASSWORD=...), on the GPU laptop only
+review.env

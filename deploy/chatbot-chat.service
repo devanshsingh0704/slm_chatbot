@@ -1,0 +1,24 @@
+# Example systemd user service for the chat page. Copy to ~/.config/systemd/user/ on the GPU machine.
+# Change "demo" to your dataset. HTTPS (needed for the microphone): put cert.pem and key.pem in tls/.
+# Review page password: REVIEW_PASSWORD=... in review.env (no file = review page closed).
+[Unit]
+Description=Chatbot web page (https, port 8010)
+Wants=chatbot-ollama.service
+After=chatbot-ollama.service
+
+[Service]
+WorkingDirectory=%h/slm_chatbot
+Environment=OLLAMA_URL=http://127.0.0.1:11437/api/chat
+Environment=OLLAMA_MODEL=qwen2.5:7b
+Environment=FASTEMBED_CACHE_PATH=%h/slm_chatbot/.cache/fastembed
+Environment=TLS_CERT=%h/slm_chatbot/tls/cert.pem
+Environment=TLS_KEY=%h/slm_chatbot/tls/key.pem
+# faster-whisper on CUDA needs the cuBLAS/cuDNN libraries installed in the venv (see requirements.txt)
+Environment=LD_LIBRARY_PATH=%h/slm_chatbot/.venv/lib/python3.13/site-packages/nvidia/cublas/lib:%h/slm_chatbot/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib
+EnvironmentFile=-%h/slm_chatbot/review.env
+ExecStart=%h/slm_chatbot/.venv/bin/python chat_server.py demo 0.0.0.0 8010
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

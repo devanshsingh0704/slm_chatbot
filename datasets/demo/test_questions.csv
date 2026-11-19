@@ -1,0 +1,20 @@
+question,expected_answer,source,type
+What does the company make?,"Cold-roll-formed steel profiles, welded steel tubes, and brackets.",D01,answer
+When was the company founded?,1987.,D02,answer
+Who owns the company?,"Maria Lindqvist, owner and Managing Director.",D02;D03,answer
+Who is the CEO?,"Daniel Okafor, Chief Executive Officer.",D03,answer
+Who is Tomas Novak?,"Production Manager (roll forming and welding).",D03,answer
+How many employees are there?,About 120.,D02,answer
+How do I apply for a job?,"jobs@example.com, +1 555-0101.",D04,answer
+how do i get a quotation,"sales@example.com, +1 555-0102.",D04,answer
+What thickness of steel can you work with?,0.8 mm to 4 mm.,D06,answer
+How many roll forming lines are there?,6 roll-forming lines and 2 tube mills.,D06,answer
+Is the warehouse a production site?,"No, Hillview is storage and dispatch only.",D05,answer
+What is the minimum order?,500 metres of profile or 200 parts.,D08,answer
+Do you use a CMM?,"Yes, for complex brackets.",D07,answer
+Is the company ISO 9001 certified?,"Unverified: one source claims it, no certificate published.",D07,not_verified
+What is the price per metre?,(refuse: prices are not published),,refuse
+What's the weather today?,(refuse: not in our documents),,refuse
+Write me a Python script.,(refuse: not in our documents),,refuse
+Tell me a joke.,(chat: a short work-friendly joke; no company facts),,chat
+Thanks!,(chat: you're welcome + invite another question),,chat

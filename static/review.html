@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}: wrong answers</title>
+<style>
+  :root { --bg: #f6f7f9; --panel: #fff; --text: #1c2430; --muted: #5d6878; --line: #dde2e8; --good: #1d7a3a; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12161c; --panel: #1a2029; --text: #e3e8ef; --muted: #98a3b3; --line: #2c3542; --good: #6fcf8f; --bad: #f28b82; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 0 16px 40px; }
+  header { padding: 20px 0 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); }
+  h1 { margin: 0; font-size: 1.15rem; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+  .item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 14px; }
+  .q { font-weight: 600; }
+  .n { color: var(--muted); font-weight: 400; margin-right: 6px; }
+  .a { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+  .meta { color: var(--muted); font-size: .85rem; }
+  .rate { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+  .rate button { border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 6px; padding: 2px 12px; cursor: pointer; font-size: 1rem; }
+  .rate button.on.good { border-color: var(--good); outline: 2px solid var(--good); }
+  .rate button.on.bad { border-color: var(--bad); outline: 2px solid var(--bad); }
+  button:focus-visible { outline: 2px solid var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>{{TITLE}}: wrong answers (👎)</h1>
+    <p id="summary">Loading…</p>
+  </header>
+  <div id="list" aria-live="polite"></div>
+</main>
+<script>
+// Shows only the answers rated 👎 (from any tab or person); new ones appear automatically.
+const list = document.getElementById("list"), summary = document.getElementById("summary");
+const shown = new Map();  // id -> {good, buttons}
+
+function setRating(id, good) {
+  const s = shown.get(id);
+  s.good = good;
+  s.buttons.forEach(b => b.classList.toggle("on", (b.dataset.good === "1") === good));
+  update();
+}
+
+function update() {
+  const down = [...shown.values()].filter(s => s.good === false).length;
+  summary.textContent = `${down} wrong answers (👎) to fix. Rate new answers in the chat page.`;
+}
+
+function add(r, n) {
+  const div = document.createElement("div");
+  div.className = "item";
+  const q = document.createElement("div"); q.className = "q";
+  const num = document.createElement("span"); num.className = "n"; num.textContent = `#${n}`;
+  q.append(num, r.question, r.previous ? `  (follow-up to: ${r.previous})` : "");
+  const a =document.createElement("div"); a.className = "a"; a.textContent = r.answer || `[error: ${r.error}]`;
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = `sources: ${r.retrieved.join(", ")} · ${r.seconds}s · ${r.time.replace("T", " ")}`;
+  const rate = document.createElement("div"); rate.className = "rate";
+  const buttons = [["👍", true], ["👎", false]].map(([label, good]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.dataset.good = good ? "1" : "0";
+    b.className = good ? "good" : "bad";
+    b.setAttribute("aria-label", good ? "Answer was right" : "Answer was wrong");
+    b.onclick = () => {
+      fetch("/feedback", { method: "POST", body: JSON.stringify({ id: r.id, good }) });
+      setRating(r.id, good);
+    };
+    return b;
+  });
+  rate.append(...buttons);
+  div.append(q, a, meta, rate);
+  list.append(div);
+  shown.set(r.id, { good: null, buttons });
+  if (r.good !== null && r.good !== undefined) setRating(r.id, r.good);
+}
+
+async function refresh() {
+  try {
+    const rows = await (await fetch("/log.json")).json();
+    rows.forEach((r, i) => { if (r.good === false && !shown.has(r.id)) add(r, i + 1); });
+    update();
+  } catch (e) { summary.textContent = "Could not load the log; is the server running?"; }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+previous_question,question,source,type
+Who is the CEO?,What does he do?,D03,followup
+How do I contact sales?,And for purchases?,D04,followup
+Where is the Riverside plant?,Is it the head office?,D05;D02,followup
+What does the company make?,What thickness can it handle?,D06,followup
+Who is the CEO?,Where is the warehouse?,D05,switch
+How do I contact HR?,What is the minimum order?,D08,switch
+Who is the CEO? | What does he do?,Is he also the owner?,D02;D03,chain
