@@ -7,7 +7,7 @@ import sys
 import time
 
 from answer import DEFAULT_LLM, ask
-from retrieval import DATASETS, ROOT, Store, config
+from retrieval import DATASETS, Store, config
 
 # Phrases that show the model passed on a "not verified" boundary instead of inventing a value.
 HEDGES = ("not verified", "unverified", "not confirmed", "not published", "not publicly",
@@ -21,7 +21,7 @@ dataset = sys.argv[1]
 fallback = config(dataset)["fallback"]
 questions = list(csv.DictReader((DATASETS / dataset / "test_questions.csv").open()))
 store = Store()
-out_dir = ROOT / "results" / dataset
+out_dir = DATASETS.parent / "results" / dataset  # next to the data, so private answers stay private
 out_dir.mkdir(parents=True, exist_ok=True)
 
 for model in sys.argv[2:] or [DEFAULT_LLM]:
@@ -48,7 +48,7 @@ for model in sys.argv[2:] or [DEFAULT_LLM]:
             print(f"{'ok ' if ok else 'BAD'} {times[-1]:5.1f}s [{q['type']}] {q['question'][:50]!r} -> {text[:110]!r}")
 
     times.sort()
-    print(f"\n=== {dataset} / {model}: saved {out.relative_to(ROOT)}")
+    print(f"\n=== {dataset} / {model}: saved {out}")
     for kind, oks in checks.items():
         if kind != "over-hedged":
             print(f"  {kind:13} auto-check {sum(oks)}/{len(oks)}")

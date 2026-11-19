@@ -62,6 +62,10 @@ Without an NVIDIA GPU add `WHISPER_DEVICE=cpu` for the microphone. Browsers allo
 
 4. Write tests (below), run `build.py <name>`, then serve with `chat_server.py <name> [host] [port]`.
 
+**Keep private data out of this repo:** put your datasets in a separate (private) folder and point the code at it
+with `CHATBOT_DATASETS=/path/to/datasets`. Test answers are then saved next to it (`/path/to/results/`), and
+the chat log stays in the dataset folder. `store/` (the search index) is never committed.
+
 Not handled yet: Word/Excel files (convert to PDF), scanned documents (need OCR), per-user access control
 (do not load documents some users must not see), and replacing a changed document automatically.
 

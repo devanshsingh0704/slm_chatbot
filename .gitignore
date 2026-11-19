@@ -10,5 +10,7 @@ tls/
 # colleagues' questions and ratings: personal usage data that changes all the time
 datasets/*/chat_log.jsonl
 datasets/*/raw/
+# saved test answers (eval_answers.py)
+results/
 # review page password (REVIEW_PASSWORD=...), on the GPU laptop only
 review.env

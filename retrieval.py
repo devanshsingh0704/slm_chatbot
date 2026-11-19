@@ -2,6 +2,7 @@
 Usage: python retrieval.py <dataset|all> "question\""""
 import hashlib
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -11,7 +12,8 @@ import chromadb
 from fastembed import TextEmbedding
 
 ROOT = Path(__file__).parent
-DATASETS = ROOT / "datasets"
+# Private data can live outside this repo: CHATBOT_DATASETS=/path/to/datasets
+DATASETS = Path(os.environ.get("CHATBOT_DATASETS", ROOT / "datasets"))
 MODEL = "BAAI/bge-small-en-v1.5"
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "  # bge was trained with it
 
