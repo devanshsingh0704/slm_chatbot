@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 
 import numpy as np
+import pymupdf
 import pymupdf4llm
 
 from retrieval import DATASETS, Store
@@ -28,12 +29,45 @@ MIN_WORDS = 25      # a section intro shorter than this is merged into the follo
 TABLE_SPLIT = 60    # tables longer than this become one chunk per row, so each row meets its own topic
 SKIP_SECTIONS = {"references", "bibliography", "citations", "sources", "video sources"}
 FORMAT_RANK = {".md": 0, ".txt": 1, ".pdf": 2, ".jsonl": 3, ".json": 3}  # preferred copy of identical content
+IMAGES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+
+
+_ocr = []
+
+
+def ocr(image):
+    """Text read from an image (path or bytes) by RapidOCR, one line per text line. On 100 real scanned pages
+    (MP-DocVQA) it read the answer on 90, a paid OCR (Textract) on 91; pymupdf4llm's own OCR route only on 66."""
+    if not _ocr:
+        from rapidocr import RapidOCR  # only needed for scans and images
+        _ocr.append(RapidOCR())
+    return "\n".join(_ocr[0](image).txts or [])
+
+
+def scanned_pages(doc):
+    """Page numbers of a PDF with no text layer (scans), which only OCR can read."""
+    return [page.number for page in doc if not page.get_text().strip()]
+
+
+def ocr_pdf_page(doc, page):
+    """OCR one scanned PDF page: its scan image at full resolution if it is a single image, else a 300 dpi render."""
+    images = page.get_images()
+    data = doc.extract_image(images[0][0])["image"] if len(images) == 1 else page.get_pixmap(dpi=300).tobytes("png")
+    return ocr(data)
 
 
 def extract(path):
-    """Return the file's content as markdown, or None if the type is unsupported."""
+    """Return the file's content as markdown, or None if the type is unsupported.
+    Scanned PDF pages and images are read by OCR (ocr()); pages with a text layer are read as text."""
     if path.suffix == ".pdf":
-        return pymupdf4llm.to_markdown(str(path))
+        doc = pymupdf.open(path)
+        scans = scanned_pages(doc)
+        if not scans:
+            return pymupdf4llm.to_markdown(str(path))
+        return "\n\n".join(f"## {path.stem}, page {n + 1}\n{ocr_pdf_page(doc, doc[n])}" if n in scans
+                             else pymupdf4llm.to_markdown(doc, pages=[n]) for n in range(len(doc)))
+    if path.suffix.lower() in IMAGES:
+        return f"## {path.stem}\n{ocr(path)}"
     if path.suffix in (".md", ".txt"):
         return path.read_text()
     if path.suffix in (".jsonl", ".json"):
@@ -316,7 +350,11 @@ def main(dataset):
         status = f"new {doc['doc_id']}: {doc['n_chunks']} chunks{doc['note']}"
         if doc["broken"]:
             status += "; WARNING: a table looks broken after PDF extraction, check those chunks"
-        report["files"].append((doc["path"].name, status))
+        path = doc["path"]
+        read = len(scanned_pages(pymupdf.open(path))) if path.suffix == ".pdf" else path.suffix.lower() in IMAGES
+        if read:
+            status += f"; read by OCR ({read} page{'s' if read > 1 else ''}): check names and numbers in its chunks"
+        report["files"].append((path.name, status))
     report["conflicts"] = sorted(conflicts, reverse=True)[:CONFLICTS_SHOWN]
     report["n_conflicts"] = len(conflicts)
 

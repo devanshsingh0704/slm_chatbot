@@ -45,7 +45,9 @@ Without an NVIDIA GPU add `WHISPER_DEVICE=cpu` for the microphone. Browsers allo
 `localhost` or HTTPS: for other machines set `TLS_CERT` and `TLS_KEY` (a self-signed certificate works).
 
 ## Your own dataset
-1. `mkdir -p datasets/<name>/raw`, put PDF / Markdown / text / JSON files in `raw/`, copy `datasets/demo/config.json`.
+1. `mkdir -p datasets/<name>/raw`, put PDF / Markdown / text / JSON files and scans or photos (PNG, JPG, TIFF) in `raw/`,
+   copy `datasets/demo/config.json`. Scanned PDF pages and images are read by OCR (RapidOCR, on the CPU, about
+   4 s per page); the report marks those files, so check their names and numbers first.
 2. `.venv/bin/python ingest.py <name>` drafts `datasets/<name>/chunks.md` and writes `ingest_report.md`
    (duplicates, conflicting numbers, facts only one document states). **Read and fix `chunks.md` by hand:**
    it is the source of truth. Format: `## <id> | <topic>`, a `sources:` line, then the text. Mark a doubtful
@@ -68,7 +70,7 @@ Without an NVIDIA GPU add `WHISPER_DEVICE=cpu` for the microphone. Browsers allo
 with `CHATBOT_DATASETS=/path/to/datasets`. Test answers are then saved next to it (`/path/to/results/`), and
 the chat log stays in the dataset folder. `store/` (the search index) is never committed.
 
-Not handled yet: Word/Excel files (convert to PDF), scanned documents (need OCR), per-user access control
+Not handled yet: Word/Excel files (convert to PDF), handwriting, per-user access control
 (do not load documents some users must not see), and replacing a changed document automatically.
 
 ## Tests
@@ -78,6 +80,7 @@ Not handled yet: Word/Excel files (convert to PDF), scanned documents (need OCR)
 | `eval_followups.py <dataset> [model]` | follow-ups, topic switches, 3-question chains from `followup_questions.csv` (gate 100%) | only with a model name |
 | `eval_answers.py <dataset> [model]` | answers every test question; counts fallbacks, missing caveats, over-hedging; saves answers to read | yes |
 | `test_speech.py <dataset>` | how answers are rewritten for the voice | no |
+| `test_ocr.py` | typed, scanned and mixed PDFs and images are all read (makes its own test files) | no |
 
 `test_questions.csv`: `question, expected_answer, source` (chunk ids, `;`-separated), `type`
 (`answer`, `not_verified`, `refuse`, `chat`). On the demo dataset: retrieval 14/14, follow-ups 7/7, speech 17/17.
@@ -92,7 +95,7 @@ so a shared GPU is freed between uses. Limits in `chat_server.py`: 75 questions 
 ## Files
 | File | What it does |
 |---|---|
-| `ingest.py` | raw files → draft chunks + review report |
+| `ingest.py` | raw files (incl. OCR of scans and images) → draft chunks + review report |
 | `build.py` | `chunks.md` → vector store (only changed chunks are re-embedded) |
 | `retrieval.py` | hybrid search (meaning + keywords), rare-word matching, glossary, typo correction |
 | `answer.py` | prompts, greetings, small talk, fixed answers, person contacts, model call |

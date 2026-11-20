@@ -10,5 +10,7 @@ ctranslate2==4.8.1
 av==17.1.0
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.24.0.43
-# spoken answers (CPU); voice file: .cache/piper/en_US-lessac-medium.onnx (+ .onnx.json) from rhasspy/piper-voices
+# spoken answers (CPU); voice file: .cache/piper/en_US-joe-medium.onnx (+ .onnx.json) from rhasspy/piper-voices
 piper-tts==1.8.0
+# OCR for scanned PDF pages and images (ingest.py)
+rapidocr==3.10.0
