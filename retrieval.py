@@ -2,6 +2,7 @@
 Usage: python retrieval.py <dataset|all> "question\""""
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -69,6 +70,15 @@ def edits(a, b, limit):
 
 
 RARE_CHUNKS = 2  # a word in more chunks than this is not specific enough to pull a chunk in
+SYNC_BATCH = 1000  # chunks embedded and saved per database call
+# Hybrid search: the meaning (vector) and keyword (BM25) rankings, each cut at FUSE_DEPTH, merged by reciprocal rank
+# fusion. config.json "keyword_weight" sets the keyword side's weight; 0 = meaning + rare-word chunks only.
+# Measured: MIF (hand-written sections, paraphrased questions) 93/93 with 0, 90/93 with 1.0; 6,510 OCR'd pages of
+# MP-DocVQA (questions reuse the documents' words), answer page in the top 5: 32% with 0, 45% with 1.0, 48% with 1.5+.
+KEYWORD_WEIGHT = 1.0  # for datasets that do not set it; tune it per dataset with its test questions
+FUSE_DEPTH = 20
+RRF_K = 60  # standard RRF constant: only ranks count, so the two methods' scores never have to be compared
+TOKEN = re.compile(r"[a-z0-9]+")
 
 
 class Store:
@@ -85,6 +95,7 @@ class Store:
         self.embedder = TextEmbedding(MODEL)
         self._vocab = {}
         self._where = {}
+        self._bm25 = {}
 
     def embed(self, texts, query=False):
         return [v.tolist() for v in self.embedder.embed([QUERY_PREFIX + t if query else t for t in texts])]
@@ -98,15 +109,20 @@ class Store:
             c["hash"] = hashlib.sha256(c["text"].encode()).hexdigest()[:16]
         changed = [k for k, c in want.items() if have.get(k) != c["hash"]]
         removed = [k for k in have if k not in want]
-        if changed:
+        # In batches: Chroma refuses more than ~5,400 records per call (a 6,510-page dataset failed after 28 min of
+        # embedding), and each saved batch survives a crash, since only new or changed chunks are embedded again.
+        for start in range(0, len(changed), SYNC_BATCH):
+            batch = changed[start:start + SYNC_BATCH]
             self.col.upsert(
-                ids=changed,
-                embeddings=self.embed([want[k]["text"] for k in changed]),
-                documents=[want[k]["text"] for k in changed],
+                ids=batch,
+                embeddings=self.embed([want[k]["text"] for k in batch]),
+                documents=[want[k]["text"] for k in batch],
                 metadatas=[{"dataset": dataset, "id": want[k]["id"], "topic": want[k]["topic"],
-                            "sources": "; ".join(want[k]["sources"]), "hash": want[k]["hash"]} for k in changed])
-        if removed:
-            self.col.delete(ids=removed)
+                            "sources": "; ".join(want[k]["sources"]), "hash": want[k]["hash"]} for k in batch])
+            if len(changed) > SYNC_BATCH:
+                print(f"  {start + len(batch)}/{len(changed)} chunks embedded", flush=True)
+        for start in range(0, len(removed), SYNC_BATCH):
+            self.col.delete(ids=removed[start:start + SYNC_BATCH])
         return len(changed), len(removed), len(want)
 
     def vocab(self, dataset):
@@ -132,10 +148,41 @@ class Store:
                 found |= ids
         return found
 
+    def keyword_ranking(self, query, dataset):
+        """Chunk ids of the dataset ranked by BM25 keyword score (k1 1.5, b 0.75); chunks sharing no word left out."""
+        if dataset not in self._bm25:
+            got = self.col.get(where={"dataset": dataset}, include=["documents"])
+            words = [Counter(TOKEN.findall(d.lower())) for d in got["documents"]]
+            lengths = [sum(w.values()) for w in words]
+            self._bm25[dataset] = (got["ids"], words, lengths, Counter(t for w in words for t in w),
+                                   sum(lengths) / max(len(lengths), 1))
+        ids, words, lengths, df, avg = self._bm25[dataset]
+        n, terms = len(ids), set(TOKEN.findall(query.lower()))
+        scored = []
+        for chunk_id, w, length in zip(ids, words, lengths):
+            score = sum(math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5)) * w[t] * 2.5
+                        / (w[t] + 1.5 * (0.25 + 0.75 * length / avg)) for t in terms if t in w)
+            if score > 0:
+                scored.append((score, chunk_id))
+        return [chunk_id for _, chunk_id in sorted(scored, reverse=True)]
+
     def search(self, query, dataset=None, k=3, query_is_text=False):
         """Return [(cosine score, chunk dict)] best first. dataset=None searches every dataset."""
         query = expand(query, dataset, self.vocab(dataset) if dataset else ())
         vector = self.embed([query], query=not query_is_text)
+        weight = config(dataset).get("keyword_weight", KEYWORD_WEIGHT) if dataset else 0
+        if weight > 0:
+            meaning = self.col.query(query_embeddings=vector, n_results=FUSE_DEPTH, where={"dataset": dataset},
+                                     include=[])["ids"][0]
+            fused = Counter()
+            for ranking, w in ((meaning, 1.0), (self.keyword_ranking(query, dataset)[:FUSE_DEPTH], weight)):
+                for rank, chunk_id in enumerate(ranking):
+                    fused[chunk_id] += w / (RRF_K + rank + 1)
+            best = [chunk_id for chunk_id, _ in fused.most_common(k)]
+            got = self.col.get(ids=best, include=["documents", "metadatas", "embeddings"])
+            found = {i: (float(sum(a * b for a, b in zip(e, vector[0]))), {**m, "text": t})
+                     for i, e, m, t in zip(got["ids"], got["embeddings"], got["metadatas"], got["documents"])}
+            return [found[chunk_id] for chunk_id in best]  # fused order; the score shown is the meaning match
         res = self.col.query(query_embeddings=vector, n_results=k, where={"dataset": dataset} if dataset else None,
                              include=["documents", "metadatas", "distances"])
         hits = [(1 - d, {**m, "text": t})

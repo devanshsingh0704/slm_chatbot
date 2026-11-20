@@ -14,7 +14,7 @@ documents and a settings file. `datasets/demo/` is a small **fictional** company
 - **Greetings and small talk** are answered directly; small talk gets a short friendly reply with no company facts.
 - **Fixed answers** for questions that must be word-for-word (addresses), and **person contact requests**
   ("Connect me to Mr. Smith") answered from a people list.
-- **Search that handles names and typos:** meaning-based search plus exact matching of rare words (names, codes),
+- **Hybrid search that handles names, codes and typos:** meaning-based plus keyword (BM25) search, tunable per dataset,
   a glossary for company abbreviations, and spelling correction against the documents' own words.
 - **Voice:** 🎤 speech-to-text (faster-whisper) and spoken answers read while the text appears (Piper), with
   rules so the voice says units, ranges, dates, phone numbers and emails properly.
@@ -24,7 +24,8 @@ documents and a settings file. `datasets/demo/` is a small **fictional** company
 1. Greetings, person-contact requests and fixed answers (`config.json`) reply instantly. Small talk gets a
    short reply from the model without documents. A greeting at the start of a question is answered first.
 2. Otherwise the question (with glossary and typo fixes) is matched to the 3 closest chunks in a Chroma vector
-   store (bge-small embeddings, `retrieval.py`); chunks containing a rare word of the question are added.
+   store (bge-small embeddings, `retrieval.py`), merged with a keyword (BM25) ranking: hybrid search. With
+   `keyword_weight` 0, chunks containing a rare word of the question (a name, a code) are added instead.
    A follow-up is also searched together with the previous questions.
 3. The model (`qwen2.5:7b` recommended, `answer.py`) answers from those chunks only.
 4. The page speaks the answer phrase by phrase while showing it (`/speak`).
@@ -59,6 +60,7 @@ Without an NVIDIA GPU add `WHISPER_DEVICE=cpu` for the microphone. Browsers allo
 | `people`, `general_contact` | name, `match` words, `role`, optional own `contact`: replies to "connect me to …" |
 | `speech_hint` | names and terms the speech recognizer should expect |
 | `pronunciations` | how the voice should say a word (`"Lindqvist": "Lind kvist"`); the screen text is unchanged |
+| `keyword_weight` | search mix (default 1.0): `0` = meaning-based search only (plus exact matching of rare words); above 0 = hybrid, meaning + keyword (BM25) search. Raise it for raw documents whose wording users repeat (scans, forms, reports); `0` suits short hand-written sections. Pick the value with your test questions (`eval_retrieval.py`) |
 
 4. Write tests (below), run `build.py <name>`, then serve with `chat_server.py <name> [host] [port]`.
 
@@ -92,7 +94,7 @@ so a shared GPU is freed between uses. Limits in `chat_server.py`: 75 questions 
 |---|---|
 | `ingest.py` | raw files → draft chunks + review report |
 | `build.py` | `chunks.md` → vector store (only changed chunks are re-embedded) |
-| `retrieval.py` | search, rare-word matching, glossary, typo correction |
+| `retrieval.py` | hybrid search (meaning + keywords), rare-word matching, glossary, typo correction |
 | `answer.py` | prompts, greetings, small talk, fixed answers, person contacts, model call |
 | `chat_server.py` | web page, `/ask`, `/speak`, `/transcribe`, `/review`, HTTPS, the voice rules |
 | `static/` | chat page and review page |
